@@ -1,0 +1,67 @@
+#!/bin/bash
+#
+# This script will build nvim and install it under
+# $HOME/nvim-${nvimVersion}
+#
+# To use just create a symlink like below in your home dir with the righ version
+# Ex:
+#
+# lrwxrwxrwx  1 venkit venkit          11 Apr  9 11:58 tools -> nvim-v0.4.3
+#
+
+if [ "$1" == "" ]; then
+   echo "Need to provide version Ex: v0.4.3"
+   exit 1
+fi
+
+echo $1
+
+home=$HOME
+containerName="NVIM-BUILD"
+tmpFile="/tmp/__neovim_docker_build_"
+nvimVersion=$1
+
+# Stop and remove container
+docker stop ${containerName}
+docker rm ${containerName}
+
+# Create docker container
+docker run -t -d --name ${containerName} fedora bash
+
+cat > ${tmpFile} << EOL
+#!/usr/bin/bash
+
+# Create home directory
+mkdir ${home}
+cd ${home}
+export HOME=${home}
+
+# Install pre-requisites
+yum install -y git cmake ninja-build glibc-static make gcc gcc-c++ libtool unzip gettext jemalloc patch
+
+# Download neovim
+git clone https://github.com/neovim/neovim.git
+cd neovim
+git checkout ${nvimVersion}
+
+# BUILD and install
+BUILD_TOOL=ninja-build  \
+   make \
+   CMAKE_EXTRA_FLAGS="-DCMAKE_INSTALL_PREFIX:PATH=$HOME/tools -DCMAKE_EXE_LINKER_FLAGS=\"-static\" -DCMAKE_FIND_LIBRARY_SUFFIXES=\".a\"" \
+   CMAKE_BUILD_TYPE=Release
+BUILD_TOOL=ninja-build make install
+EOL
+
+# Run the build inside the container
+chmod +x ${tmpFile}
+docker cp ${tmpFile} ${containerName}:${tmpFile}
+rm ${tmpFile}
+docker exec -it ${containerName} ${tmpFile}
+
+# Copy from the container
+rm -rf ${home}/nvim-${nvimVersion}
+docker cp ${containerName}:${home}/tools ${home}/nvim-${nvimVersion}
+
+# Stop and remove container
+docker stop ${containerName}
+docker rm ${containerName}
